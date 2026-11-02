@@ -1,0 +1,845 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Script PDF</title>
+  <style>
+:root {
+  --bg: #f5f6f8;
+  --card: #fff;
+  --text: #1c2330;
+  --muted: #667085;
+  --line: #d9dee7;
+  --accent: #1f5fd0;
+  --ok: #1a7f47;
+  --ok-bg: #e7f6ec;
+  --warn: #8a5a00;
+  --warn-bg: #fff3c4;
+  --miss: #b42318;
+  --miss-bg: #fde7e4;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.6 -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif;
+}
+
+header, main { max-width: 1100px; margin: 0 auto; padding: 0 16px; }
+header { padding-top: 24px; }
+h1 { margin: 0; font-size: 24px; }
+header p { margin: 4px 0 0; color: var(--muted); }
+
+section {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px 20px 20px;
+  margin: 16px 0;
+}
+
+h2 { margin: 0 0 12px; font-size: 17px; display: flex; align-items: center; gap: 8px; }
+.step {
+  display: inline-grid; place-items: center;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--accent); color: #fff; font-size: 13px;
+}
+
+.drop {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 20px; border: 2px dashed var(--line); border-radius: 8px;
+  color: var(--muted); cursor: pointer; text-align: center;
+}
+.drop strong { color: var(--text); }
+.drop:hover, .drop.over { border-color: var(--accent); background: #eef4ff; }
+
+.status { margin: 8px 0 0; color: var(--muted); min-height: 1.6em; }
+.status.error { color: var(--miss); }
+
+#clearScript { margin-left: 8px; color: var(--miss); border-color: var(--miss); font-weight: 600; }
+textarea {
+  width: 100%; margin-top: 8px; padding: 10px;
+  border: 1px solid var(--line); border-radius: 8px;
+  font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace; resize: vertical;
+}
+
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+.inline { display: inline-flex; align-items: center; gap: 6px; }
+#nameField { margin-left: auto; }
+#fileName { width: 220px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+
+button {
+  font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--line);
+  background: #fff; padding: 4px 10px;
+}
+#download {
+  padding: 10px 20px; border: 0;
+  background: var(--accent); color: #fff; font-weight: 600;
+}
+#download:disabled { background: #b6c2d6; cursor: not-allowed; }
+
+.summary { margin: 12px 0 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.badge {
+  display: inline-block; padding: 1px 10px; border-radius: 999px;
+  font-size: 13px; font-weight: 600; white-space: nowrap;
+}
+.badge.ok { background: var(--ok-bg); color: var(--ok); }
+.badge.warn { background: var(--warn-bg); color: var(--warn); }
+.badge.missing, .badge.invalid { background: var(--miss-bg); color: var(--miss); }
+
+table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+#resultTable tr.warn { background: #fffbea; }
+#resultTable tr.missing, #resultTable tr.invalid { background: #fff5f4; }
+#resultTable td:nth-child(3), #resultTable td:nth-child(4) {
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px;
+}
+.note { color: var(--warn); font-family: inherit; }
+tr.missing .note, tr.invalid .note { color: var(--miss); }
+.diff { display: block; color: var(--warn); }
+.diff b { background: var(--warn-bg); padding: 0 3px; border-radius: 3px; }
+.src { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Script PDF</h1>
+    <p>Scriptに対応する絵を探して、Scriptの順番で1つのPDFにまとめます。</p>
+  </header>
+
+  <main>
+    <section>
+      <h2><span class="step">1</span>絵のPDF</h2>
+      <label class="drop" id="pdfDrop">
+        <input type="file" id="pdfInput" accept="application/pdf,.pdf" multiple hidden>
+        <strong>PDFをここにドラッグ&ドロップ</strong>
+        <span>またはクリックして選択 (複数可)</span>
+      </label>
+      <p class="status" id="pdfStatus"></p>
+      <table id="gameTable" hidden>
+        <thead><tr><th>OFF</th><th>日付</th><th>相手</th><th>枚数</th><th>ファイル</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2><span class="step">2</span>Script<button id="clearScript">Clear</button></h2>
+      <label class="drop" id="scriptDrop">
+        <input type="file" id="scriptInput" accept=".xlsx,.xlsm,.xls,.csv,image/*" hidden>
+        <strong>Excel またはスクショをここにドラッグ&ドロップ</strong>
+        <span>クリックして選択 / Excelのセルやスクショをコピーして Ctrl+V (⌘V) で貼り付けも可</span>
+      </label>
+      <p class="status" id="scriptStatus"></p>
+      <label class="inline" id="sheetPicker" hidden>シート
+        <select id="sheetSelect"></select>
+      </label>
+      <textarea id="scriptText" rows="10" spellcheck="false"
+        placeholder="1行に1プレー。直接貼り付け・修正もできます。&#10;vs 26aut Big Blue #13 / 1-10 / R / 10 / GUN TRIO SLOT + / GY BACK COUNTER&#10;KG 251013 vs Kandai #1 / 1-10 / L / 10 / GUN TRIO +(FTX) / 1STEP"></textarea>
+    </section>
+
+    <section>
+      <h2><span class="step">3</span>照合してダウンロード</h2>
+      <div class="toolbar">
+        <label class="inline">OFFチーム
+          <select id="offSelect"></select>
+        </label>
+        <label class="inline"><input type="checkbox" id="placeholder">
+          見つからない行に白紙ページを入れる</label>
+        <label class="inline" id="nameField">ファイル名
+          <input type="text" id="fileName" placeholder="空欄なら script_日付" spellcheck="false">
+        </label>
+        <button id="download" disabled>結合PDFをダウンロード</button>
+      </div>
+      <p class="summary" id="summary"></p>
+      <table id="resultTable" hidden>
+        <thead><tr><th>#</th><th>結果</th><th>Script</th><th>PDFの絵</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script>
+// Script行とPDFタイトルの解析・照合 (DOMに依存しない)
+const ScriptCore = (() => {
+
+// 学校名とチーム名の対応。names はどの表記で書かれていても同じチームとして扱う。
+const TEAMS = [
+  { id: 'Kindai', names: ['Kindai', 'Big Blue', '近大', '近畿大'] },
+  { id: 'Kandai', names: ['Kandai', 'Kaisers', '関大', '関西大'] },
+  { id: 'Rits', names: ['Rits', 'Panthers', 'Ritsumei', 'Ritsumeikan', '立命', '立命館'] },
+  { id: 'KG', names: ['KG', 'Fighters', 'Kwansei', 'Kwansei Gakuin', 'Kangaku', '関学', '関西学院'] },
+  { id: 'Kyodai', names: ['Kyodai', 'Gang Stars', 'Gangsters', 'Kyoto', '京大', '京都大'] },
+  { id: 'Kobe', names: ['Kobe', 'Ravens', '神戸', '神大', '神戸大'] },
+  { id: 'Doshisha', names: ['Doshisha', 'Doshisya', 'Wild Rover', '同志社', '同大'] },
+  { id: 'Konan', names: ['Konan', 'Red Gang', '甲南', '甲南大'] },
+  { id: 'Waseda', names: ['Waseda', 'Big Bears', '早稲田', '早大'] },
+];
+
+const teamKey = (s) =>
+  s.normalize('NFKC').toLowerCase().replace(/[^a-z0-9぀-ヿ一-鿿]/g, '');
+
+const TEAM_INDEX = new Map(
+  TEAMS.flatMap((t) => t.names.map((n) => [teamKey(n), t.id])),
+);
+
+// 表記ゆれを吸収したチームID。未登録のチームは正規化した文字列をそのままIDにする。
+function teamId(name) {
+  const key = teamKey(name);
+  return TEAM_INDEX.get(key) ?? key;
+}
+
+// 比較用: 全角/半角・大文字小文字・空白・ダッシュの違いを無視する
+function normField(s) {
+  return (s ?? '')
+    .normalize('NFKC')
+    .replace(/[‐-―−ー]/g, '-')
+    .toUpperCase()
+    .replace(/\s+/g, '');
+}
+
+const clean = (s) => s.normalize('NFKC').replace(/\s+/g, ' ').trim();
+
+const SCRIPT_RE = /^vs\.?\s*(\d{2})\s*(spr|aut|ps)\s+(.+?)\s*#\s*(\d+)\s*\/\s*(.*)$/i;
+const TITLE_RE = /^(.+?)\s+(\d{6})\s+vs\.?\s+(.+?)\s*#\s*(\d+)\s*\/\s*(.*)$/i;
+const HASH_RE = /^[RLMC]$/i;
+
+// "vs 26aut Gang Stars #28 / 1-10 / R / BUNCH OPEN N / DIVE"
+function parseScriptLine(text) {
+  const raw = clean(text);
+  const m = raw.match(SCRIPT_RE);
+  if (!m) return null;
+  const parts = m[5].split('/').map((p) => p.trim());
+  const dd = parts.shift() ?? '';
+  const hash = parts.length > 2 && HASH_RE.test(parts[0]) ? parts.shift().toUpperCase() : '';
+  const personnel = parts.length > 2 && /^\d{2}$/.test(parts[0]) ? parts.shift() : '';
+  const formation = parts.shift() ?? '';
+  return {
+    raw,
+    yy: m[1],
+    season: m[2].toLowerCase(),
+    oppRaw: m[3],
+    opp: teamId(m[3]),
+    num: Number(m[4]),
+    dd,
+    hash,
+    personnel,
+    formation,
+    play: parts.join(' / '),
+  };
+}
+
+// "Kandai 260905 vs Kindai #1 / 1-10 / GUN SPREAD OPEN - / A DE TRAP"
+function parsePdfTitle(text) {
+  const raw = clean(text);
+  const m = raw.match(TITLE_RE);
+  if (!m) return null;
+  const month = Number(m[2].slice(2, 4));
+  if (month < 1 || month > 12) return null;
+  const parts = m[5].split('/').map((p) => p.trim());
+  const dd = parts.shift() ?? '';
+  const hash = parts.length > 2 && HASH_RE.test(parts[0]) ? parts.shift().toUpperCase() : '';
+  const personnel = parts.length > 2 && /^\d{2}$/.test(parts[0]) ? parts.shift() : '';
+  const formation = parts.shift() ?? '';
+  return {
+    raw,
+    offRaw: m[1],
+    off: teamId(m[1]),
+    date: m[2],
+    yy: m[2].slice(0, 2),
+    // 7月以前はspr、8月〜11/15はaut、11/16以降はps
+    season: month <= 7 ? 'spr' : (Number(m[2].slice(2, 6)) >= 1116 ? 'ps' : 'aut'),
+    oppRaw: m[3],
+    opp: teamId(m[3]),
+    num: Number(m[4]),
+    dd,
+    hash,
+    personnel,
+    formation,
+    play: parts.join(' / '),
+  };
+}
+
+// 貼り付けやOCRのテキストからScript行だけを取り出す
+function extractScriptLines(text, { fromOcr = false } = {}) {
+  const lines = [];
+  // Excelからコピーした文字は列がタブで区切られているので、セルごとに見る
+  for (const line of text.split(/[\r\n\t]+/)) {
+    const m = line.match(/vs\.?\s*\d{2}\s*(?:spr|aut|ps)\b.*/i);
+    if (!m) {
+      // PDFのタイトルと同じ書き方の行もそのまま使う
+      const title = line.replace(/^\s*"+|"+\s*$/g, '');
+      if (parsePdfTitle(title)) lines.push(clean(title));
+      continue;
+    }
+    let s = m[0];
+    if (fromOcr) {
+      // 罫線が | や [ として行末に混ざることがあるので落とす
+      s = s.replace(/\s*[|\[\]].*$/, '');
+    }
+    // Excelは改行を含むセルを " で囲んでコピーするので、行末に残った " を落とす
+    lines.push(clean(s.replace(/"+\s*$/, '')));
+  }
+  return lines;
+}
+
+// Script行 (vs 26aut …) か、PDFタイトルと同じ書き方 (Kandai 260905 vs …) の行を読む。
+// PDFタイトルの形なら OFFチームと日付まで決まる。
+function parseScriptRow(text) {
+  const row = parseScriptLine(text);
+  if (row) return row;
+  const title = parsePdfTitle(text);
+  return title ? { ...title } : null;
+}
+
+const FIELDS = [
+  ['dd', 'D&D'],
+  ['formation', '体型'],
+  ['play', 'Play名'],
+];
+
+function diffFields(row, title) {
+  return FIELDS.filter(([k]) => normField(row[k]) !== normField(title[k])).map(
+    ([k, label]) => ({ field: k, label, script: row[k], pdf: title[k] }),
+  );
+}
+
+// rows: parseScriptRow の結果 (解析できない行は {raw, invalid:true})
+// pages: [{fileId, pageIndex, title}]  title は parsePdfTitle の結果
+// offTeam: OFFチームのID。空なら全チームから探す。
+function matchScript(rows, pages, offTeam) {
+  const pool = offTeam ? pages.filter((p) => p.title.off === offTeam) : pages;
+  return rows.map((row) => {
+    if (row.invalid) {
+      return { row, status: 'invalid', pages: [], notes: ['Script行として読めません'] };
+    }
+    // PDFタイトルの形で書かれた行は、そこに書かれたOFFチームと日付で試合を決める
+    const rowPool = row.off ? pages.filter((p) => p.title.off === row.off) : pool;
+    const game = rowPool.filter((p) =>
+      row.date
+        ? p.title.date === row.date && p.title.opp === row.opp
+        : p.title.yy === row.yy && p.title.season === row.season && p.title.opp === row.opp,
+    );
+    let hits = game.filter((p) => p.title.num === row.num);
+    const notes = [];
+    let diffs = [];
+
+    if (hits.length) {
+      diffs = hits.map((p) => diffFields(row, p.title));
+      if (new Set(hits.map((p) => p.title.date)).size > 1) {
+        notes.push('同じシーズンに同じ相手との試合が複数あります');
+      }
+      if (new Set(hits.map((p) => p.title.off)).size > 1) {
+        notes.push('複数のOFFチームの絵が該当します');
+      }
+    } else {
+      // 番号が合わなくても、他の項目が全部同じ絵があれば候補として出す
+      hits = game.filter((p) => diffFields(row, p.title).length === 0);
+      if (hits.length) {
+        diffs = hits.map(() => []);
+        notes.push(`Play番号が違います (PDFは #${hits.map((p) => p.title.num).join(', #')})`);
+      }
+    }
+
+    if (!hits.length) {
+      notes.push(game.length ? 'この番号の絵がありません' : 'この試合のPDFがストックにありません');
+      return { row, status: 'missing', pages: [], diffs: [], notes };
+    }
+    const warn = notes.length > 0 || diffs.some((d) => d.length > 0);
+    return { row, status: warn ? 'warn' : 'ok', pages: hits, diffs, notes };
+  });
+}
+
+return { TEAMS, teamId, normField, parseScriptLine, parsePdfTitle, parseScriptRow, extractScriptLines, matchScript };
+})();
+  </script>
+  <script>
+(() => {
+const { TEAMS, parseScriptRow, parsePdfTitle, extractScriptLines, matchScript } = ScriptCore;
+
+const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const TESSERACT_SRC = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) =>
+  String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+const state = {
+  files: [], // {id, name, bytes, pages: [{file, pageIndex, title}], unreadable}
+  sheets: [], // Excel読み込み時: [{name, lines}]
+  results: [],
+};
+let nextLocalId = 1;
+
+// ブラウザの設定によっては localStorage が使えないので、失敗しても止まらないようにする
+function loadPref(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function savePref(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {}
+}
+
+const teamName = (id) => (TEAMS.some((t) => t.id === id) ? id : id.toUpperCase());
+const fmtDate = (d) => `20${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4, 6)}`;
+
+// ---------- 絵のPDF ----------
+
+// ページ上部から順に行を組み立て、タイトルの形をした最初の行を返す
+async function readPageTitle(page) {
+  const { items } = await page.getTextContent();
+  const lines = [];
+  for (const it of items) {
+    if (!it.str.trim()) continue;
+    const x = it.transform[4];
+    const y = it.transform[5];
+    let line = lines.find((l) => Math.abs(l.y - y) < 3);
+    if (!line) lines.push((line = { y, parts: [] }));
+    line.parts.push({ x, end: x + it.width, str: it.str });
+  }
+  lines.sort((a, b) => b.y - a.y);
+  for (const line of lines) {
+    line.parts.sort((a, b) => a.x - b.x);
+    let text = '';
+    let end = null;
+    for (const p of line.parts) {
+      if (end !== null && p.x - end > 1.5) text += ' ';
+      text += p.str;
+      end = p.end;
+    }
+    const title = parsePdfTitle(text);
+    if (title) return title;
+  }
+  return null;
+}
+
+async function addPdfFiles(fileList) {
+  const files = [...fileList].filter((f) => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
+  if (!files.length) return;
+  const status = $('pdfStatus');
+  status.className = 'status';
+  const errors = [];
+  for (const [i, f] of files.entries()) {
+    status.textContent = `読み込み中… ${i + 1} / ${files.length}  ${f.name}`;
+    try {
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      // pdf.js は渡したバッファを使えなくするのでコピーを渡す
+      const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+      const entry = { id: `local-${nextLocalId++}`, name: f.name, bytes, pages: [], unreadable: 0 };
+      for (let n = 1; n <= doc.numPages; n++) {
+        const title = await readPageTitle(await doc.getPage(n));
+        if (title) entry.pages.push({ file: entry, pageIndex: n - 1, title });
+        else entry.unreadable++;
+      }
+      doc.destroy();
+      // 同じ名前のファイルを入れ直したら置き換える
+      state.files = state.files.filter((x) => x.name !== f.name);
+      state.files.push(entry);
+    } catch (e) {
+      console.error(e);
+      errors.push(f.name);
+    }
+  }
+  if (errors.length) {
+    status.className = 'status error';
+    status.textContent = `読み込めなかったファイル: ${errors.join(', ')}`;
+  } else {
+    status.textContent = '';
+  }
+  renderStock();
+  update();
+}
+
+function renderStock() {
+  const tbody = $('gameTable').tBodies[0];
+  const rows = [];
+  for (const f of state.files) {
+    const games = new Map();
+    for (const p of f.pages) {
+      const key = `${p.title.off}|${p.title.date}|${p.title.opp}`;
+      if (!games.has(key)) games.set(key, { t: p.title, count: 0 });
+      games.get(key).count++;
+    }
+    const del = `<button data-remove="${esc(f.id)}">削除</button>`;
+    if (!games.size) {
+      rows.push(`<tr><td colspan="4" class="note">タイトルを読めるページがありません</td><td>${esc(f.name)}</td><td>${del}</td></tr>`);
+    }
+    [...games.values()].forEach((g, i) => {
+      const bad = i === 0 && f.unreadable ? ` <span class="note">(タイトルを読めないページ ${f.unreadable})</span>` : '';
+      rows.push(
+        `<tr><td>${esc(teamName(g.t.off))}</td><td>${fmtDate(g.t.date)}</td><td>vs ${esc(teamName(g.t.opp))}</td>` +
+          `<td>${g.count}${bad}</td><td>${esc(f.name)}</td><td>${i === 0 ? del : ''}</td></tr>`,
+      );
+    });
+  }
+  tbody.innerHTML = rows.join('');
+  $('gameTable').hidden = !state.files.length;
+
+  const sel = $('offSelect');
+  const teams = [...new Set(state.files.flatMap((f) => f.pages.map((p) => p.title.off)))].sort();
+  const want = sel.options.length ? sel.value : (loadPref('offTeam') ?? '');
+  sel.innerHTML =
+    teams.map((t) => `<option value="${esc(t)}">${esc(teamName(t))}</option>`).join('') +
+    (teams.length === 1 ? '' : '<option value="">(すべてのチーム)</option>');
+  const hasAll = teams.length !== 1;
+  sel.value = teams.includes(want) || (want === '' && hasAll) ? want : (teams[0] ?? '');
+}
+
+// ---------- Script ----------
+
+function parseExcelPlaylistRows(rows) {
+  const lines = [];
+  for (const row of rows) {
+    if (!Array.isArray(row)) continue;
+    const getCol = (idx) => (row[idx] != null ? String(row[idx]).trim() : "");
+
+    // B列(1): OFF PLAY#, E列(4): Down, F列(5): Distance, G列(6): Hash
+    // L列(11): 日程と対戦相手, O列(14): Personnel, P列(15): Formation, V列(21): OFF Play
+    const oppInfo = getCol(11);
+    const playNumRaw = getCol(1);
+    const downRaw = getCol(4);
+    const distRaw = getCol(5);
+    const hash = getCol(6).toUpperCase();
+    const personnel = getCol(14);
+    const formation = getCol(15);
+    const playName = getCol(21);
+
+    if (!oppInfo || !playNumRaw || !playName) continue;
+
+    // ヘッダー行などのスキップ判定
+    const numMatch = playNumRaw.match(/\d+/);
+    if (!numMatch) continue;
+    if (downRaw && !/^\d+$/.test(downRaw) && /down/i.test(downRaw)) continue;
+
+    const playNum = numMatch[0];
+    const opp = /^vs/i.test(oppInfo) ? oppInfo : `vs ${oppInfo}`;
+    const dd = (downRaw && distRaw) ? `${downRaw}-${distRaw}` : (downRaw || distRaw || "");
+
+    const parts = [`${opp} #${playNum}`, dd];
+    if (hash) parts.push(hash);
+    if (personnel) parts.push(personnel);
+    if (formation) parts.push(formation);
+    parts.push(playName);
+
+    lines.push(parts.join(" / "));
+  }
+  return lines;
+}
+
+async function readExcel(file) {
+  const wb = XLSX.read(await file.arrayBuffer());
+  state.sheets = wb.SheetNames.map((name) => {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: false, defval: "" });
+    // まずPlaylistData形式 (L, B, E, F, G, O, P, V列) の抽出を試みる
+    let lines = parseExcelPlaylistRows(rows);
+    // 取れなかった場合は従来のセル内テキスト抽出を行う
+    if (!lines.length) {
+      lines = extractScriptLines(rows.flat().map(String).join("\n"));
+    }
+    return { name, lines };
+  }).filter((s) => s.lines.length);
+  const sel = $('sheetSelect');
+  sel.innerHTML = state.sheets
+    .map((s, i) => `<option value="${i}">${esc(s.name)} (${s.lines.length}行)</option>`)
+    .join('');
+  $('sheetPicker').hidden = state.sheets.length < 2;
+  return state.sheets[0]?.lines ?? [];
+}
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error(`${src} を読み込めません`));
+    document.head.append(s);
+  });
+}
+
+async function readImage(file, onProgress) {
+  if (!window.Tesseract) await loadScript(TESSERACT_SRC);
+  // 小さい文字は認識しにくいので2倍に拡大してから読む
+  const bmp = await createImageBitmap(file);
+  const canvas = document.createElement('canvas');
+  canvas.width = bmp.width * 2;
+  canvas.height = bmp.height * 2;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  // 黄色などで塗られた行も読めるよう、色付きの背景を白に寄せる
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const px = img.data;
+  for (let i = 0; i < px.length; i += 4) {
+    px[i] = px[i + 1] = px[i + 2] = Math.max(px[i], px[i + 1], px[i + 2]);
+  }
+  ctx.putImageData(img, 0, 0);
+  const worker = await Tesseract.createWorker('eng', 1, {
+    logger: (m) => m.status === 'recognizing text' && onProgress(m.progress),
+  });
+  try {
+    // 表の罫線に引きずられないよう、文字のかたまりごとに読むモード(11)を使う
+    await worker.setParameters({ tessedit_pageseg_mode: '11' });
+    const { data } = await worker.recognize(canvas);
+    return extractScriptLines(data.text, { fromOcr: true });
+  } finally {
+    await worker.terminate();
+  }
+}
+
+async function addScriptFile(file) {
+  if (!file) return;
+  const status = $('scriptStatus');
+  status.className = 'status';
+  $('sheetPicker').hidden = true;
+  const isImage = file.type.startsWith('image/');
+  if (!isImage && !/\.(xlsx|xlsm|xls|csv)$/i.test(file.name)) {
+    status.className = 'status error';
+    status.textContent = `${file.name} は読み込めません。Excel(.xlsx)か画像を入れてください。`;
+    return;
+  }
+  try {
+    let lines;
+    if (isImage) {
+      status.textContent = '文字を読み取り中…';
+      lines = await readImage(file, (p) => {
+        status.textContent = `文字を読み取り中… ${Math.round(p * 100)}%`;
+      });
+    } else {
+      status.textContent = '読み込み中…';
+      lines = await readExcel(file);
+    }
+    if (!lines.length) {
+      status.className = 'status error';
+      status.textContent = '「vs 26aut …」「vs 25ps …」やPDFタイトルの形の行が見つかりませんでした';
+      return;
+    }
+    $('scriptText').value = lines.join('\n');
+    status.textContent = isImage
+      ? `${lines.length}行を読み取りました。スクショは読み間違いがあるので、下の文字を確認・修正してください。`
+      : `${lines.length}行を読み込みました (${file.name})`;
+    update();
+  } catch (e) {
+    console.error(e);
+    status.className = 'status error';
+    status.textContent = `読み込めませんでした: ${e.message}`;
+  }
+}
+
+// ---------- 照合 ----------
+
+const STATUS_LABEL = { ok: '一致', warn: '要確認', missing: 'なし', invalid: '読めない行' };
+
+function update() {
+  const rows = $('scriptText')
+    .value.split(/\r?\n/)
+    .map((l) => l.trim())
+    // 貼り付けで残った " だけの行などは数えない
+    .filter((l) => /[0-9a-z]/i.test(l))
+    .map((l) => parseScriptRow(l) ?? { raw: l, invalid: true });
+  const pages = state.files.flatMap((f) => f.pages);
+  state.results = matchScript(rows, pages, $('offSelect').value);
+  renderResults();
+}
+
+function renderResults() {
+  const count = { ok: 0, warn: 0, missing: 0, invalid: 0 };
+  const html = state.results.map((r, i) => {
+    count[r.status]++;
+    const pdf = r.pages
+      .map((p, j) => {
+        const diffs = r.diffs[j]
+          .map((d) => `<span class="diff">${d.label}: Script <b>${esc(d.script)}</b> / PDF <b>${esc(d.pdf)}</b></span>`)
+          .join('');
+        return `<div>${esc(p.title.raw)} <span class="src">— ${esc(p.file.name)} p.${p.pageIndex + 1}</span>${diffs}</div>`;
+      })
+      .join('');
+    const notes = r.notes.map((n) => `<div class="note">${esc(n)}</div>`).join('');
+    return (
+      `<tr class="${r.status}"><td>${i + 1}</td>` +
+      `<td><span class="badge ${r.status}">${STATUS_LABEL[r.status]}</span></td>` +
+      `<td>${esc(r.row.raw)}</td><td>${pdf}${notes}</td></tr>`
+    );
+  });
+  $('resultTable').tBodies[0].innerHTML = html.join('');
+  $('resultTable').hidden = !state.results.length;
+
+  const pageTotal = state.results.reduce((n, r) => n + r.pages.length, 0);
+  $('summary').innerHTML = state.results.length
+    ? `<span class="badge ok">一致 ${count.ok}</span>` +
+      `<span class="badge warn">要確認 ${count.warn}</span>` +
+      `<span class="badge missing">なし ${count.missing + count.invalid}</span>` +
+      `<span>→ PDF ${pageTotal}ページ</span>`
+    : '';
+  $('download').disabled = pageTotal === 0;
+}
+
+// ---------- 結合PDF ----------
+
+async function buildPdf() {
+  const { PDFDocument, StandardFonts } = PDFLib;
+  const out = await PDFDocument.create();
+  const sources = new Map();
+  const font = $('placeholder').checked ? await out.embedFont(StandardFonts.Helvetica) : null;
+  for (const r of state.results) {
+    if (!r.pages.length) {
+      if (!font) continue;
+      const page = out.addPage([842, 595]);
+      // 標準フォントは英数字しか描けない
+      const text = r.row.raw.replace(/[^\x20-\x7e]/g, '?');
+      page.drawText('NOT FOUND', { x: 82, y: 540, size: 16, font });
+      page.drawText(text, { x: 82, y: 515, size: 12, font });
+      continue;
+    }
+    for (const p of r.pages) {
+      if (!sources.has(p.file)) {
+        sources.set(p.file, await PDFDocument.load(p.file.bytes));
+      }
+      const [copied] = await out.copyPages(sources.get(p.file), [p.pageIndex]);
+      out.addPage(copied);
+    }
+  }
+  return out.save();
+}
+
+async function download() {
+  const btn = $('download');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '作成中…';
+  try {
+    const bytes = await buildPdf();
+    const d = new Date();
+    const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+    // ファイル名に使えない文字と、末尾に付けられた .pdf は取り除く
+    const name = $('fileName').value.replace(/[\\/:*?"<>|]/g, '').trim().replace(/\.pdf$/i, '').trim();
+    a.download = `${name || `script_${stamp}`}.pdf`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  } catch (e) {
+    console.error(e);
+    alert(`PDFを作成できませんでした: ${e.message}`);
+  } finally {
+    btn.textContent = label;
+    btn.disabled = false;
+  }
+}
+
+// ---------- イベント ----------
+
+const isPdf = (f) => /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
+const hasFiles = (e) => [...(e.dataTransfer?.types ?? [])].includes('Files');
+
+// PDFは①へ、それ以外 (Excel・画像) は②へ振り分ける
+function addFiles(fileList) {
+  const files = [...fileList];
+  const pdfs = files.filter(isPdf);
+  const others = files.filter((f) => !isPdf(f));
+  if (pdfs.length) addPdfFiles(pdfs);
+  if (others.length) addScriptFile(others[0]);
+}
+
+function wireDrop(zone, input, onFiles) {
+  zone.addEventListener('dragover', (e) => {
+    if (hasFiles(e)) zone.classList.add('over');
+  });
+  zone.addEventListener('dragleave', () => zone.classList.remove('over'));
+  input.addEventListener('change', () => {
+    onFiles(input.files);
+    input.value = '';
+  });
+}
+
+wireDrop($('pdfDrop'), $('pdfInput'), addFiles);
+wireDrop($('scriptDrop'), $('scriptInput'), addFiles);
+
+// 画面のどこに落としても読み込む。ブラウザがファイルを開いてしまうのも防ぐ。
+window.addEventListener('dragover', (e) => {
+  if (hasFiles(e)) e.preventDefault();
+});
+window.addEventListener('drop', (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  document.querySelectorAll('.drop.over').forEach((z) => z.classList.remove('over'));
+  addFiles(e.dataTransfer.files);
+});
+
+document.addEventListener('paste', (e) => {
+  if (e.target !== $('scriptText') && e.target.closest?.('input, textarea')) return;
+  // Excelのセルをコピーすると文字と画像の両方が入るので、文字を先に見る
+  const text = e.clipboardData.getData('text/plain');
+  const lines = extractScriptLines(text);
+  const box = $('scriptText');
+  if (lines.length && (e.target !== box || /[\t"]/.test(text))) {
+    e.preventDefault();
+    if (e.target === box) {
+      box.setRangeText(lines.join('\n'), box.selectionStart, box.selectionEnd, 'end');
+    } else {
+      box.value = lines.join('\n');
+      $('sheetPicker').hidden = true;
+      $('scriptStatus').className = 'status';
+      $('scriptStatus').textContent = `${lines.length}行を貼り付けました`;
+    }
+    update();
+    return;
+  }
+  if (lines.length) return; // 入力欄への普通の貼り付けはそのまま
+  const img = [...e.clipboardData.files].find((f) => f.type.startsWith('image/'));
+  if (img) {
+    e.preventDefault();
+    addScriptFile(img);
+  }
+});
+
+$('gameTable').addEventListener('click', (e) => {
+  const file = state.files.find((f) => f.id === e.target.dataset.remove);
+  if (!file) return;
+  state.files = state.files.filter((f) => f !== file);
+  renderStock();
+  update();
+});
+
+$('sheetSelect').addEventListener('change', (e) => {
+  $('scriptText').value = state.sheets[e.target.value].lines.join('\n');
+  update();
+});
+$('scriptText').addEventListener('input', update);
+$('clearScript').addEventListener('click', () => {
+  $('scriptText').value = '';
+  $('scriptStatus').className = 'status';
+  $('scriptStatus').textContent = '';
+  $('sheetPicker').hidden = true;
+  state.sheets = [];
+  update();
+});
+$('offSelect').addEventListener('change', (e) => {
+  savePref('offTeam', e.target.value);
+  update();
+});
+$('download').addEventListener('click', download);
+
+// 動作確認用
+window.scriptPdf = { state, addPdfFiles, addScriptFile, buildPdf };
+
+renderStock();
+})();
+  </script>
+</body>
+</html>
