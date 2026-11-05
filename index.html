@@ -180,7 +180,7 @@ const TEAMS = [
   { id: 'KG', names: ['KG', 'Fighters', 'Kwansei', 'Kwansei Gakuin', 'Kangaku', '関学', '関西学院'] },
   { id: 'Kyodai', names: ['Kyodai', 'Gang Stars', 'Gangsters', 'Kyoto', '京大', '京都大'] },
   { id: 'Kobe', names: ['Kobe', 'Ravens', '神戸', '神大', '神戸大'] },
-  { id: 'Doshisha', names: ['Doshisha', 'Doshisya', 'Wild Rover', '同志社', '同大'] },
+  { id: 'Doshisha', names: ['Doshisha', 'Dosisha', 'Doshisya', 'Dosisya', 'Wild Rover', '同志社', '同大'] },
   { id: 'Konan', names: ['Konan', 'Red Gang', '甲南', '甲南大'] },
   { id: 'Waseda', names: ['Waseda', 'Big Bears', '早稲田', '早大'] },
   { id: 'Meiji', names: ['Meiji', 'Griffins', 'Meidai', '明治', '明治大', '明大'] },
@@ -190,7 +190,7 @@ const TEAMS = [
 ];
 
 const teamKey = (s) =>
-  s.normalize('NFKC').toLowerCase().replace(/[^a-z0-9぀-ヿ一-鿿]/g, '');
+  s.normalize('NFKC').toLowerCase().replace(/^vs\.?\s*/i, '').replace(/[^a-z0-9぀-ヿ一-鿿]/g, '');
 
 const TEAM_INDEX = new Map(
   TEAMS.flatMap((t) => t.names.map((n) => [teamKey(n), t.id])),
@@ -222,9 +222,9 @@ function dateToSeason(dateStr) {
   return 'aut';
 }
 
-const SCRIPT_SEASON_RE = /^vs\.?\s*(\d{2})\s*(spr|aut|ps)\s+(.+?)\s*#\s*(\d+)\s*\/\s*(.*)$/i;
-const SCRIPT_DATE_RE = /^vs\.?\s*(\d{6})\s+(.+?)\s*#\s*(\d+)\s*\/\s*(.*)$/i;
-const TITLE_RE = /^(.+?)\s+(\d{6})\s+vs\.?\s+(.+?)\s*#\s*(\d+)\s*\/\s*(.*)$/i;
+const SCRIPT_SEASON_RE = /^(?:vs\.?\s*)?(\d{2})\s*(spr|aut|ps)\s+(?:vs\.?\s*)?(.+?)\s*#\s*(\d+)\s*\/\s*(.*)$/i;
+const SCRIPT_DATE_RE = /^(?:vs\.?\s*)?(\d{6})\s+(?:vs\.?\s*)?(.+?)\s*#\s*(\d+)\s*\/\s*(.*)$/i;
+const TITLE_RE = /^(.+?)\s+(\d{6})\s+(?:vs\.?\s*)+(.+?)\s*#\s*(\d+)\s*\/\s*(.*)$/i;
 const HASH_RE = /^[RLMC]$/i;
 
 // "vs 26aut Gang Stars #28 / ..." または "vs 261103 Kandai #1 / ..."
@@ -237,7 +237,7 @@ function parseScriptLine(text) {
     yy = mSeason[1];
     season = mSeason[2].toLowerCase();
     date = null;
-    oppRaw = mSeason[3];
+    oppRaw = mSeason[3].replace(/^vs\.?\s*/i, '').trim();
     num = Number(mSeason[4]);
     remainder = mSeason[5];
   } else {
@@ -246,7 +246,7 @@ function parseScriptLine(text) {
     date = mDate[1];
     yy = date.slice(0, 2);
     season = dateToSeason(date);
-    oppRaw = mDate[2];
+    oppRaw = mDate[2].replace(/^vs\.?\s*/i, '').trim();
     num = Number(mDate[3]);
     remainder = mDate[4];
   }
@@ -291,7 +291,7 @@ function parsePdfTitle(text) {
     date: m[2],
     yy: m[2].slice(0, 2),
     season: dateToSeason(m[2]),
-    oppRaw: m[3],
+    oppRaw: m[3].replace(/^vs\.?\s*/i, '').trim(),
     opp: teamId(m[3]),
     num: Number(m[4]),
     dd,
@@ -307,7 +307,7 @@ function extractScriptLines(text, { fromOcr = false } = {}) {
   const lines = [];
   // Excelからコピーした文字は列がタブで区切られているので、セルごとに見る
   for (const line of text.split(/[\r\n\t]+/)) {
-    const m = line.match(/vs\.?\s*(?:\d{2}\s*(?:spr|aut|ps)|\d{6})\b.*/i);
+    const m = line.match(/(?:vs\.?\s*)?(?:\d{2}\s*(?:spr|aut|ps)|\d{6})\b.*/i);
     if (!m) {
       // PDFのタイトルと同じ書き方の行もそのまま使う
       const title = line.replace(/^\s*"+|"+\s*$/g, '');
@@ -357,17 +357,28 @@ function matchScript(rows, pages, offTeam) {
     }
     // PDFタイトルの形で書かれた行は、そこに書かれたOFFチームと日付で試合を決める
     const rowPool = row.off ? pages.filter((p) => p.title.off === row.off) : pool;
-    const game = rowPool.filter((p) =>
+    let game = rowPool.filter((p) =>
       row.date
         ? p.title.date === row.date && p.title.opp === row.opp
         : p.title.yy === row.yy && p.title.season === row.season && p.title.opp === row.opp,
     );
+    let dateMismatch = false;
+    // 日付指定で該当試合が見つからない場合、同シーズン・同相手でフォールバック検索
+    if (!game.length && row.date) {
+      game = rowPool.filter((p) =>
+        p.title.yy === row.yy && p.title.season === row.season && p.title.opp === row.opp,
+      );
+      if (game.length) dateMismatch = true;
+    }
     let hits = game.filter((p) => p.title.num === row.num);
     const notes = [];
     let diffs = [];
 
     if (hits.length) {
       diffs = hits.map((p) => diffFields(row, p.title));
+      if (dateMismatch && hits[0]?.title?.date) {
+        notes.push(`Scriptの日付(${row.date})とPDFの日付(${hits[0].title.date})が異なります`);
+      }
       if (new Set(hits.map((p) => p.title.date)).size > 1) {
         notes.push('同じシーズンに同じ相手との試合が複数あります');
       }
@@ -560,7 +571,11 @@ function parseExcelPlaylistRows(rows) {
     if (downRaw && !/^\d+$/.test(downRaw) && /down/i.test(downRaw)) continue;
 
     const playNum = numMatch[0];
-    const opp = /^vs/i.test(oppInfo) ? oppInfo : `vs ${oppInfo}`;
+    const cleanOpp = oppInfo
+      .replace(/^vs\.?\s*/i, '')
+      .replace(/^(\d{2}(?:spr|aut|ps)|\d{6})\s*vs\.?\s*/i, '$1 ')
+      .trim();
+    const opp = `vs ${cleanOpp}`;
     const dd = (downRaw && distRaw) ? `${downRaw}-${distRaw}` : (downRaw || distRaw || "");
 
     const parts = [`${opp} #${playNum}`, dd];
@@ -818,7 +833,14 @@ document.addEventListener('paste', (e) => {
   if (e.target !== $('scriptText') && e.target.closest?.('input, textarea')) return;
   // Excelのセルをコピーすると文字と画像の両方が入るので、文字を先に見る
   const text = e.clipboardData.getData('text/plain');
-  const lines = extractScriptLines(text);
+  let lines = [];
+  if (text && text.includes('\t')) {
+    const tableRows = text.split(/\r?\n/).map((l) => l.split('\t'));
+    lines = parseExcelPlaylistRows(tableRows);
+  }
+  if (!lines.length && text) {
+    lines = extractScriptLines(text);
+  }
   const box = $('scriptText');
   if (lines.length && (e.target !== box || /[\t"]/.test(text))) {
     e.preventDefault();
